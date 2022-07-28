@@ -304,7 +304,7 @@ func (t *TronScan) work() {
 			if tmp > begin {
 				begin = tmp + 1
 			}
-			if begin < 0 {
+			if begin <= 0 {
 				if t.log != nil {
 					t.log.Info(logTag, "db done idx", tmp)
 				}
