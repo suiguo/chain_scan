@@ -4,6 +4,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
+	"io/ioutil"
 	"math/big"
 	"sync"
 	"time"
@@ -30,7 +32,7 @@ const (
 )
 
 var methodMap = map[string][]string{
-	getNowBlock:        {"GET", "/walletsolidity/getnowblock"},
+	getNowBlock:        {"GET", "/walletsolidity/getnowblock", `{"visible":true}`},
 	getTranByBlockNums: {"POST", "/wallet/gettransactioninfobyblocknum", `{"num":%d,"visible":true}`},
 	getBlockByNums:     {"POST", "/walletsolidity/gettransactioninfobyblocknum", `{"num":%d,"visible":true}`},
 }
@@ -169,13 +171,29 @@ func (t *TronScan) getTranByBlock(block int, api_key string) ([]*model.TranRecor
 	return trans, nil
 }
 
+func (t *TronScan) getBlockId(block_num int, api_key string) (string, error) {
+	method := methodMap[getBlockByNums]
+	data := []byte(fmt.Sprintf(method[2], block_num))
+	resp, err := nettool.GetMethod(t.cfg.ApiUrl, method[0], method[1], data, "TRON-PRO-API-KEY", api_key)
+	if err != nil {
+		return "", err
+	}
+	blockData := &model.TronBlock{}
+	err = json.Unmarshal(resp, blockData)
+	if err != nil {
+		return "", err
+	}
+	return blockData.BlockID, nil
+}
+
 func (t *TronScan) getNowBlock() (int, error) {
 	method := methodMap[getNowBlock]
-	data := make([]byte, 0)
-	resp, err := nettool.GetMethod(t.cfg.ApiUrl, method[0], method[1], data, "TRON-PRO-API-KEY", t.cfg.ApiKey[0])
+	// data :=
+	resp, err := nettool.GetMethod(t.cfg.ApiUrl, method[0], method[1], []byte(method[2]), "TRON-PRO-API-KEY", t.cfg.ApiKey[0])
 	if err != nil || resp == nil {
 		return 0, err
 	}
+	ioutil.WriteFile("result.json", resp, fs.ModePerm)
 	blockData := &model.TronBlock{}
 	err = json.Unmarshal(resp, blockData)
 	if err != nil {
@@ -229,6 +247,7 @@ func (t *TronScan) scanBlock(start_block int, end_block int, api_key string) err
 		if t.log != nil {
 			t.log.Info(logTag, "work idx", begin)
 		}
+		t.getNowBlock()
 		trans, err := t.getTranByBlock(begin, api_key)
 		if err != nil {
 			if t.log != nil {
@@ -300,7 +319,12 @@ func (t *TronScan) work() {
 			}
 			key_number := len(t.cfg.ApiKey)
 			blocks := end - begin
-			step := blocks/key_number + 1
+			step := 0
+			if blocks < key_number {
+				key_number = blocks
+			} else {
+				step = blocks/key_number + 1
+			}
 			for i := 0; i < key_number; i++ {
 				b := begin + i*step + 1
 				e := begin + (i+1)*step

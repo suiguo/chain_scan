@@ -10,7 +10,9 @@ import (
 )
 
 func main() {
-
+	// info := fmt.Sprintf("%x", 42801345)
+	// fmt.Println(info)
+	// return
 	scan := chain.NewScan(model.TRON)
 	if scan != nil {
 		log, _ := utils.NewLog([]*utils.LoggerCfg{
