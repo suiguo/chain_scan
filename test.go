@@ -13,18 +13,6 @@ func main() {
 
 	scan := chain.NewScan(model.TRON)
 	if scan != nil {
-		/*
-					 "maxsize": 500,
-			        "maxbackups": 5,
-			        "maxage": 20160,
-			        "compress": false,
-			        "level": 0
-		*/
-		// tmp, err := base58.Decode("TWgdDVZ1GCTmBeC1NWbJ6vWTYxtYrWrsxz")
-		// if err != nil {
-		// 	return
-		// }
-		// fmt.Println(hex.EncodeToString(tmp))
 		log, _ := utils.NewLog([]*utils.LoggerCfg{
 			{
 				Name:       "stdout",
@@ -37,14 +25,13 @@ func main() {
 		scan.Init(tron.WithApiKey("bd1bdb00-34a1-41b0-9efb-84d422ce3cb2"),
 			tron.WithUrl("https://api.trongrid.io"),
 			tron.WithContractAddr("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"),
-			tron.WithToAddr("TWgdDVZ1GCTmBeC1NWbJ6vWTYxtYrWrsxz"),
-			tron.WithStartBlock(42723579),
+			tron.WithToAddr("TSRFE6vCH5LBeNtSHa3wLKBEmNR3NHebbb"),
+			tron.WithStartBlock(42801342),
 			tron.WithInterval(time.Second),
 			tron.WithLog(log))
-		scan.Run()
-		scan.Stop()
+		utils.Go(scan.Run)
+		utils.GoWait()
+		// scan.Stop()
 	}
-	for {
-		time.Sleep(time.Second * 10)
-	}
+
 }

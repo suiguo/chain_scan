@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/suiguo/chain_scan/chain/utils"
@@ -19,15 +20,19 @@ type defaultDb struct {
 }
 
 func (db *defaultDb) Save(key string, val int) {
-	ioutil.WriteFile("data", []byte(fmt.Sprintf("%d", val)), fs.ModePerm)
+	ioutil.WriteFile("data", []byte(fmt.Sprintf("%s|%d", key, val)), fs.ModePerm)
 }
 func (db *defaultDb) Load(key string) int {
 	d, err := ioutil.ReadFile("data")
-	if err == nil {
+	if err != nil {
 		return 0
 	}
-	data, _ := strconv.ParseInt(string(d), 10, 32)
-	return int(data)
+	out := strings.Split(string(d), "|")
+	if len(out) == 2 && out[0] == key {
+		data, _ := strconv.ParseInt(out[1], 10, 32)
+		return int(data)
+	}
+	return 0
 }
 
 func GetDb() DB {
@@ -45,8 +50,9 @@ const (
 type Cfg struct {
 	Type         ChainType
 	ApiUrl       string
-	ApiKey       string
+	ApiKey       []string
 	Start        int
+	End          int
 	ContractAddr string
 	FromAddr     string
 	ToAddr       string
@@ -58,6 +64,6 @@ type Options func(c *Cfg)
 
 type Scan interface {
 	Init(o ...Options) bool
-	Run() bool
+	Run()
 	Stop()
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/mr-tron/base58"
@@ -16,6 +17,7 @@ import (
 
 const logTag string = "Tron"
 
+var wg sync.WaitGroup
 var tranHash string = utils.GenMethod("Transfer(address,address,uint256)")
 
 //myaccount = 'TWgdDVZ1GCTmBeC1NWbJ6vWTYxtYrWrsxz'
@@ -41,7 +43,7 @@ func WithUrl(url string) model.Options {
 }
 
 //tron api key
-func WithApiKey(api_key string) model.Options {
+func WithApiKey(api_key ...string) model.Options {
 	return func(c *model.Cfg) {
 		c.ApiKey = api_key
 	}
@@ -51,6 +53,13 @@ func WithApiKey(api_key string) model.Options {
 func WithStartBlock(block int) model.Options {
 	return func(c *model.Cfg) {
 		c.Start = block
+	}
+}
+
+//scan end block
+func WithEndBlock(block int) model.Options {
+	return func(c *model.Cfg) {
+		c.End = block
 	}
 }
 
@@ -97,7 +106,7 @@ func (t *TronScan) checkCfg() bool {
 	if t.cfg == nil {
 		return false
 	}
-	if t.cfg.ApiUrl == "" || t.cfg.ApiKey == "" {
+	if t.cfg.ApiUrl == "" || len(t.cfg.ApiKey) == 0 {
 		return false
 	}
 	if t.cfg.Type == "" {
@@ -118,11 +127,13 @@ func (t *TronScan) checkCfg() bool {
 		if err != nil {
 			return false
 		}
-		fmt.Println(hex.EncodeToString(tmp))
 		t.to = hex.EncodeToString(tmp)[2:42]
 	}
 	if t.cfg.ContractAddr == "" {
 		t.cfg.ContractAddr = usdt_contract
+	}
+	if t.cfg.Start <= 0 {
+		t.cfg.Start = -1
 	}
 	return true
 }
@@ -133,13 +144,17 @@ func (t *TronScan) Init(o ...model.Options) bool {
 		opt(cfg)
 	}
 	t.cfg = cfg
+	t.log = cfg.Log
+	if t.signal == nil {
+		t.signal = make(chan bool)
+	}
 	return t.checkCfg()
 }
 
-func (t *TronScan) getTranByBlock(block int) ([]*model.TranRecord, error) {
+func (t *TronScan) getTranByBlock(block int, api_key string) ([]*model.TranRecord, error) {
 	method := methodMap[getTranByBlockNums]
 	data := []byte(fmt.Sprintf(method[2], block))
-	resp, err := nettool.GetMethod(t.cfg.ApiUrl, method[0], method[1], data, "TRON-PRO-API-KEY", t.cfg.ApiKey)
+	resp, err := nettool.GetMethod(t.cfg.ApiUrl, method[0], method[1], data, "TRON-PRO-API-KEY", api_key)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +163,6 @@ func (t *TronScan) getTranByBlock(block int) ([]*model.TranRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	// ioutil.WriteFile("result.json", resp, fs.ModePerm)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +172,7 @@ func (t *TronScan) getTranByBlock(block int) ([]*model.TranRecord, error) {
 func (t *TronScan) getNowBlock() (int, error) {
 	method := methodMap[getNowBlock]
 	data := make([]byte, 0)
-	resp, err := nettool.GetMethod(t.cfg.ApiUrl, method[0], method[1], data, "TRON-PRO-API-KEY", t.cfg.ApiKey)
+	resp, err := nettool.GetMethod(t.cfg.ApiUrl, method[0], method[1], data, "TRON-PRO-API-KEY", t.cfg.ApiKey[0])
 	if err != nil || resp == nil {
 		return 0, err
 	}
@@ -181,11 +195,8 @@ func (t *TronScan) rangeLog(tran *model.TranRecord) *big.Int {
 		if tran_log.Topics[0] != tranHash {
 			continue
 		}
-		if tran_log.Topics[2] == "000000000000000000000000e337c883793111f218465b663f0a783a1b4b50fa" {
-			fmt.Println("11")
-		}
 		if t.cfg.ToAddr != "" {
-			if (tran_log.Topics[2])[24:] != t.to[2:] {
+			if (tran_log.Topics[2])[24:] != t.to {
 				continue
 			}
 		}
@@ -205,52 +216,125 @@ func (t *TronScan) rangeLog(tran *model.TranRecord) *big.Int {
 	}
 	return val
 }
+func (t *TronScan) scanBlock(start_block int, end_block int, api_key string) error {
+	begin := start_block
+	end := end_block
+	if begin > end {
+		begin, end = end, begin
+	}
+	if t.log != nil {
+		t.log.Info(logTag, "from", begin, "to", end)
+	}
+	for ; begin < end+1; begin++ {
+		if t.log != nil {
+			t.log.Info(logTag, "work idx", begin)
+		}
+		trans, err := t.getTranByBlock(begin, api_key)
+		if err != nil {
+			if t.log != nil {
+				t.log.Error(logTag, "getTranByBlock", err, "len", len(trans), "block", begin)
+			}
+			return err
+		}
+		for _, tran := range trans {
+			if tran.Receipt.Result != model.Success {
+				continue
+			}
+			if t.cfg.ContractAddr != "" && tran.ContractAddress != t.cfg.ContractAddr {
+				continue
+			}
+			tran_val := t.rangeLog(tran)
+			if tran_val.String() != "0" {
+				if t.cfg.Log != nil {
+					t.cfg.Log.Info(logTag, "tnx", tran.ID, "val", tran_val)
+				}
+			}
+		}
+		// model.GetDb().Save("done", begin)
+	}
+	if t.log != nil {
+		t.log.Info(logTag, "work done", begin)
+	}
+	return nil
+}
+func (t *TronScan) Go(f func()) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		f()
+	}()
+}
+func (t *TronScan) Wait() {
+	wg.Wait()
+}
 func (t *TronScan) work() {
+	begin := t.cfg.Start
 	for {
 		select {
 		case <-time.After(t.cfg.Interval):
 			current_block, err := t.getNowBlock()
 			if err != nil {
 				t.log.Error(logTag, "getNowBlock", err)
+				continue
 			}
-			begin := t.cfg.Start
+			end := t.cfg.End
+			if end <= 0 || end > current_block {
+				end = current_block
+			}
+			tmp := model.GetDb().Load("done")
+			if tmp > begin {
+				begin = tmp + 1
+			}
 			if begin < 0 {
-				begin = current_block
-			}
-			for start := begin; start < current_block+1; start++ {
-				trans, err := t.getTranByBlock(start)
-				if err != nil {
-					if t.log != nil {
-						t.log.Error(logTag, "getTranByBlock", err, "len", len(trans))
-						break
-					}
+				if t.log != nil {
+					t.log.Info(logTag, "db done idx", tmp)
 				}
-				for _, tran := range trans {
-					if tran.Receipt.Result != model.Success {
-						continue
-					}
-					if t.cfg.ContractAddr != "" && tran.ContractAddress != t.cfg.ContractAddr {
-						continue
-					}
-					tran_val := t.rangeLog(tran)
-					if tran_val.String() != "0" {
-						if t.cfg.Log != nil {
-							t.cfg.Log.Info(logTag, "tnx", tran.ID, "val", tran_val)
+				if tmp == 0 {
+					begin = current_block
+				} else {
+					begin = tmp
+				}
+			}
+			if begin > end {
+				begin, end = end, begin
+			}
+			key_number := len(t.cfg.ApiKey)
+			blocks := end - begin
+			step := blocks/key_number + 1
+			for i := 0; i < key_number; i++ {
+				b := begin + i*step + 1
+				e := begin + (i+1)*step
+				if e > end {
+					e = end
+				}
+				if b > end {
+					b = end
+				}
+				// fmt.Println(b, e)
+				func(param1 int, parm2 int, idx int) {
+					t.Go(func() {
+						err = t.scanBlock(b, e, t.cfg.ApiKey[idx])
+						if err != nil {
+							if t.log != nil {
+								t.log.Error(logTag, "scan block", err)
+							}
 						}
-					}
-				}
+					})
+				}(b, e, i)
 			}
-
+			t.Wait()
+			model.GetDb().Save("done", end)
 		case <-t.signal:
 			return
 		}
 	}
 }
-func (t *TronScan) Run() bool {
-	// client.
-	go t.work()
-	return true
+func (t *TronScan) Run() {
+	t.work()
 }
 func (t *TronScan) Stop() {
-
+	go func() {
+		t.signal <- true
+		fmt.Println("stop")
+	}()
 }

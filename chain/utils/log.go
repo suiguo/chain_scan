@@ -33,19 +33,9 @@ type LoggerCfg struct {
 	Level      int    `json:"level"`
 }
 
-var once sync.Once
-var instance *StdLogger
 var logger_map = make(map[string]*StdLogger)
 var logger_lock sync.RWMutex
 
-/*
-   "name": "stdout",
-        "maxsize": 500,
-        "maxbackups": 5,
-        "maxage": 20160,
-        "compress": false,
-        "level": 0
-*/
 func NewLog(cfgs []*LoggerCfg) (*StdLogger, error) {
 	if cfgs == nil || len(cfgs) <= 0 {
 		return nil, fmt.Errorf("logger cfg is err")
@@ -106,41 +96,11 @@ func GetInstance(tag string, cfg []*LoggerCfg) (*StdLogger, error) {
 	return instance, nil
 }
 
-//NewStdLogger is
-func NewStdLogger() *StdLogger {
-	if instance == nil {
-		once.Do(func() {
-			writeSyncer := getLogWriter()
-			encoder := getEncoder()
-			cores := make([]zapcore.Core, 0)
-			cores = append(cores, zapcore.NewCore(encoder, writeSyncer, zapcore.DebugLevel))
-			handler := zapcore.NewTee(cores...)
-			zaplogger := zap.New(handler, zap.AddCaller(), zap.AddCallerSkip(1)) //修改堆栈深度
-			sugarLogger := zaplogger.Sugar()
-			instance = &StdLogger{
-				logger: sugarLogger,
-			}
-		})
-	}
-	return instance
-}
-
 func getEncoder() zapcore.Encoder {
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	return zapcore.NewConsoleEncoder(encoderConfig)
-}
-
-func getLogWriter() zapcore.WriteSyncer {
-	lumberJackLogger := &lumberjack.Logger{
-		Filename:   "./logs/log.txt",
-		MaxSize:    1024,
-		MaxBackups: 10,
-		MaxAge:     60 * 24 * 14,
-		Compress:   false,
-	}
-	return zapcore.AddSync(lumberJackLogger)
 }
 
 func getCfgWriter(cfg *LoggerCfg) zapcore.WriteSyncer {

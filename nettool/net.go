@@ -8,10 +8,6 @@ import (
 
 func GetMethod(url string, httpMethod string, method string, data []byte, head ...string) ([]byte, error) {
 	client := &http.Client{}
-	// d, err := json.Marshal(data)
-	// if err != nil {
-	// 	return nil, err
-	// }
 	req, _ := http.NewRequest(httpMethod, url+method, bytes.NewBuffer(data))
 	req.Header.Add("Accept", "application/json")
 	tmp := make([]string, 2)
