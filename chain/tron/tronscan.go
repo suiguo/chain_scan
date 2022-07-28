@@ -322,6 +322,7 @@ func (t *TronScan) work() {
 			step := 0
 			if blocks < key_number {
 				key_number = blocks
+				step = blocks
 			} else {
 				step = blocks/key_number + 1
 			}
